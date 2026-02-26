@@ -1,8 +1,8 @@
 # Homer Redaction Detector
 
-Detect improperly redacted PDFs where hidden text remains recoverable beneath redaction boxes.
+Detect improperly redacted PDFs where text remains recoverable from redaction boxes.
 
-Homer scans PDF documents for dark rectangular regions (redaction boxes) and checks whether the original text underneath is still embedded in the file. When text is found under a visual redaction, this is a **Homer redaction** — the redaction is cosmetic only, and the original content can be recovered.
+Homer scans PDF documents for dark rectangular regions (redaction boxes) and checks whether the original text is still embedded in the file. When text is found in a visual redaction, this is a **Homer redaction** — the redaction is cosmetic only, and the original content can be recovered by simply selecting and copying the text.
 
 ## Quick start
 
@@ -22,9 +22,10 @@ python -m homer --single-file document.pdf
 ## How it works
 
 1. **Rectangle detection** — finds dark rectangular regions from vector drawings, redaction annotations, image overlays (XObjects), and a raster fallback scanner
-2. **Text extraction** — checks for PDF text embedded underneath each dark region
-3. **OCR verification** — runs OCR on the region and compares against the embedded text; if OCR can't see the text but the PDF layer has it, the redaction is hiding content
-4. **Classification** — each page is classified as `HOMER_REDACTION`, `PROPER_REDACTION`, or `CLEAN`
+2. **Text visibility classification** — uses PyMuPDF's text-trace data to filter out OCR-layer invisible text (render mode 3) and intentional light-on-dark styling, avoiding false positives
+3. **Z-order analysis** (primary method) — uses the shared `seqno` counter from PyMuPDF's `get_texttrace()` and `get_drawings()` to determine whether text was drawn before or after a dark rectangle in the PDF content stream. Detects both text-underneath and dark-on-dark scenarios (black text drawn on top of a black box)
+4. **OCR verification** (fallback) — for ambiguous cases where z-order is inconclusive, runs OCR on the region and compares against the embedded text
+5. **Classification** — each page is classified as `HOMER_REDACTION`, `PROPER_REDACTION`, or `CLEAN`
 
 ## Usage
 
@@ -68,6 +69,7 @@ Skips files already processed in a previous run (tracked via `.homer_checkpoint.
 | `--coverage` | `0.50` | Word coverage threshold (0.0–1.0) |
 | `--max-pages` | unlimited | Maximum pages to analyse per PDF |
 | `--max-file-mb` | `500` | Skip PDFs larger than this (MB) |
+| `--no-zorder` | off | Disable z-order analysis (fall back to OCR/darkness only) |
 
 ## Dependencies
 

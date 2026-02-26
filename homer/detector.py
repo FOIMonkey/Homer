@@ -10,9 +10,11 @@ import fitz
 
 from .config import HomerConfig
 from .pdf_utils import open_pdf_robust, load_page_safe, get_words_safe
-from .pixels import dark_ratio_of_clip, text_is_light_colored
+from .pixels import dark_ratio_of_clip
 from .rects import collect_candidate_rects
 from .similarity import text_similarity
+from .text_classify import classify_text_visibility
+from .zorder import get_text_spans_cached, check_zorder
 
 logger = logging.getLogger("homer")
 
@@ -99,26 +101,82 @@ class TrueHomerDetector:
         page: fitz.Page,
         cand: Dict[str, Any],
         page_words: list,
+        text_spans: list,
     ) -> Optional[RedactionHit]:
         rect = cand["rect"]
 
-        # Accuracy #1: skip if text under rect is light-colored (dark UI, not redaction)
-        if text_is_light_colored(page, rect, self.config):
-            return None
+        # 1. Text visibility classification (replaces text_is_light_colored)
+        vis = classify_text_visibility(text_spans, rect, self.config)
+        if vis == "invisible_by_design":
+            return None  # OCR layer / transparent text -- not a redaction
+        if vis == "light_on_dark":
+            return None  # Intentional light text on dark background
 
-        # Find words overlapping this rect (accuracy #4: coverage ratio)
+        # 2. Find words overlapping this rect (accuracy #4: coverage ratio)
         inside_words = []
+        inside_bboxes = []
         for w in page_words:
             wrect = fitz.Rect(w[0], w[1], w[2], w[3])
             if self._coverage_ratio(rect, wrect) >= self.config.word_coverage_thresh:
                 inside_words.append(w[4])
+                inside_bboxes.append((w[0], w[1], w[2], w[3]))
 
         if not inside_words:
             return None
 
-        direct_text = " ".join(inside_words).strip()
+        # 3. Z-order check (deterministic, before OCR)
+        if self.config.use_zorder:
+            zresult = check_zorder(text_spans, cand.get("seqno"), inside_bboxes)
+            if zresult == "text_on_top" and vis != "dark_on_dark":
+                return None  # Text is visible and not dark-on-dark, drawn on top of rect
 
-        # OCR check
+            if zresult == "text_underneath" or (zresult == "text_on_top" and vis == "dark_on_dark"):
+                # Unapplied redaction annotation fast-path
+                if cand["source"] == "annotation":
+                    confidence = 1.0
+                    reason = "unapplied_redaction_annotation (zorder)"
+                elif vis == "dark_on_dark":
+                    confidence = self.config.zorder_confidence
+                    reason = "dark_text_on_dark_rect (zorder)"
+                else:
+                    confidence = self.config.zorder_confidence
+                    reason = "text_underneath_rect (zorder)"
+
+                # Filter junk even for z-order hits
+                substantive = [w for w in inside_words if len(w) > 1 and not all(
+                    c in "-\u2013\u2014.,;:!?'/()[]" for c in w
+                )]
+                if len(substantive) < self.config.min_substantive_words:
+                    return None
+
+                return RedactionHit(
+                    rect=(rect.x0, rect.y0, rect.x1, rect.y1),
+                    source=cand["source"],
+                    dark_ratio=cand["dark_ratio"],
+                    confidence=confidence,
+                    hidden_words=inside_words,
+                    reason=reason,
+                )
+
+            # zresult == "ambiguous" -- fall through to OCR/darkness
+
+        # 4. Unapplied redaction annotation fast-path (no z-order available)
+        if cand["source"] == "annotation" and inside_words:
+            substantive = [w for w in inside_words if len(w) > 1 and not all(
+                c in "-\u2013\u2014.,;:!?'/()[]" for c in w
+            )]
+            if len(substantive) >= self.config.min_substantive_words:
+                return RedactionHit(
+                    rect=(rect.x0, rect.y0, rect.x1, rect.y1),
+                    source=cand["source"],
+                    dark_ratio=cand["dark_ratio"],
+                    confidence=1.0,
+                    hidden_words=inside_words,
+                    reason="unapplied_redaction_annotation",
+                )
+
+        # 5. OCR check (fallback for ambiguous z-order)
+        direct_text = " ".join(inside_words).strip()
         ocr_text = self._ocr_text_in_rect(page, rect)
         if ocr_text is not None:
             sim = text_similarity(direct_text, ocr_text)
@@ -135,10 +193,9 @@ class TrueHomerDetector:
             else:
                 return None
 
-        # Filter junk: require at least N substantive words (not just
-        # punctuation, single characters, or dashes)
+        # 6. Filter junk: require at least N substantive words
         substantive = [w for w in inside_words if len(w) > 1 and not all(
-            c in "-–—.,;:!?'/()[]" for c in w
+            c in "-\u2013\u2014.,;:!?'/()[]" for c in w
         )]
         if len(substantive) < self.config.min_substantive_words:
             return None
@@ -171,13 +228,14 @@ class TrueHomerDetector:
 
         candidates = collect_candidate_rects(page, self.config)
         page_words = get_words_safe(page)  # cached once per page
+        text_spans = get_text_spans_cached(page)
 
         has_visual = len(candidates) > 0
         hits: List[RedactionHit] = []
 
         for cand in candidates:
             try:
-                hit = self._check_candidate(page, cand, page_words)
+                hit = self._check_candidate(page, cand, page_words, text_spans)
                 if hit is not None:
                     hits.append(hit)
             except Exception as e:

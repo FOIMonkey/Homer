@@ -40,6 +40,15 @@ class HomerConfig:
     max_pages: int = 0          # 0 = unlimited
     max_file_mb: int = 500      # Skip files larger than this (MB)
 
+    # Z-order analysis
+    use_zorder: bool = True
+    zorder_confidence: float = 0.95
+
+    # Text rendering mode filtering
+    skip_invisible_text: bool = True    # Skip render mode 3 (OCR layer)
+    skip_transparent_text: bool = True  # Skip opacity < threshold
+    transparency_thresh: float = 0.05
+
     # Checkpoint
     checkpoint_interval: int = 10
     checkpoint_file: str = ".homer_checkpoint.json"

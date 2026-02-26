@@ -77,7 +77,12 @@ def _from_drawings(
                     continue
                 dr = dark_ratio_of_clip(page, r, config)
                 if dr >= config.dark_ratio_thresh:
-                    results.append({"rect": r, "source": "drawing", "dark_ratio": dr})
+                    results.append({
+                        "rect": r,
+                        "source": "drawing",
+                        "dark_ratio": dr,
+                        "seqno": d.get("seqno"),
+                    })
     except Exception as e:
         logger.debug(f"get_drawings() issue: {e}")
     return results
@@ -95,7 +100,12 @@ def _from_annotations(
                     r = a.rect
                     if r.get_area() >= min_area:
                         dr = dark_ratio_of_clip(page, r, config)
-                        results.append({"rect": r, "source": "annotation", "dark_ratio": dr})
+                        results.append({
+                            "rect": r,
+                            "source": "annotation",
+                            "dark_ratio": dr,
+                            "seqno": None,
+                        })
     except Exception:
         pass
     return results
@@ -129,7 +139,12 @@ def _from_xobjects(
                     continue  # Full-page scan, not a redaction overlay
                 dr = dark_ratio_of_clip(page, r, config)
                 if dr >= config.dark_ratio_thresh:
-                    results.append({"rect": r, "source": "xobject", "dark_ratio": dr})
+                    results.append({
+                        "rect": r,
+                        "source": "xobject",
+                        "dark_ratio": dr,
+                        "seqno": None,
+                    })
     except Exception as e:
         logger.debug(f"XObject image check issue: {e}")
     return results

@@ -68,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-file-mb", type=_bounded_int(1, 10000, "--max-file-mb"),
                         default=None,
                         help="Skip PDFs larger than this size in MB (default: 500)")
+    parser.add_argument("--no-zorder", action="store_true",
+                        help="Disable z-order analysis (fall back to OCR/darkness only)")
 
     return parser
 
@@ -86,4 +88,6 @@ def config_from_args(args: argparse.Namespace) -> HomerConfig:
         config.max_pages = args.max_pages
     if args.max_file_mb is not None:
         config.max_file_mb = args.max_file_mb
+    if args.no_zorder:
+        config.use_zorder = False
     return config

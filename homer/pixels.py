@@ -80,44 +80,6 @@ def _dark_ratio_pure_python(pix, thresh: int) -> float:
 
 
 # ------------------------------------------------------------------
-# Light-text detection (accuracy #1: false positive on dark UI)
-# ------------------------------------------------------------------
-def text_is_light_colored(
-    page: fitz.Page, rect: fitz.Rect, config: HomerConfig
-) -> bool:
-    """Return True if the majority of text spans under *rect* use light colours.
-
-    Light text on a dark background is intentional styling, not hidden text.
-    """
-    try:
-        data = page.get_text("dict", clip=rect, flags=fitz.TEXT_PRESERVE_WHITESPACE)
-    except Exception:
-        return False
-
-    light_count = 0
-    total_count = 0
-    thresh = config.light_color_thresh
-
-    for block in data.get("blocks", []):
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                text = span.get("text", "").strip()
-                if not text:
-                    continue
-                total_count += 1
-                color_int = span.get("color", 0)
-                r = (color_int >> 16) & 0xFF
-                g = (color_int >> 8) & 0xFF
-                b = color_int & 0xFF
-                if r > thresh and g > thresh and b > thresh:
-                    light_count += 1
-
-    if total_count == 0:
-        return False
-    return (light_count / total_count) > 0.5
-
-
-# ------------------------------------------------------------------
 # Raster dark-region finder (performance #3: NumPy array ops)
 # ------------------------------------------------------------------
 def raster_find_dark_regions(
@@ -191,7 +153,7 @@ def _raster_dark_numpy(pix, gx, gy, sx, sy, min_area, page, config):
                 if rect.get_area() >= min_area:
                     dr = dark_ratio_of_clip(page, rect, config)
                     if dr >= config.dark_ratio_thresh:
-                        candidates.append({"rect": rect, "source": "raster", "dark_ratio": dr})
+                        candidates.append({"rect": rect, "source": "raster", "dark_ratio": dr, "seqno": None})
 
     return candidates
 
@@ -225,7 +187,7 @@ def _raster_dark_pil(pix, gx, gy, sx, sy, min_area, page, config):
                 if rect.get_area() >= min_area:
                     dr = dark_ratio_of_clip(page, rect, config)
                     if dr >= config.dark_ratio_thresh:
-                        candidates.append({"rect": rect, "source": "raster", "dark_ratio": dr})
+                        candidates.append({"rect": rect, "source": "raster", "dark_ratio": dr, "seqno": None})
 
     return candidates
 

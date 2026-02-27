@@ -13,6 +13,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+fix = [
+    "Pillow>=10.0,<12.0",
+]
 ocr = [
     "Pillow>=10.0,<12.0",
     "pytesseract>=0.3.10,<1.0",
@@ -24,7 +27,7 @@ repair = [
     "pikepdf>=8.0,<10.0",
 ]
 all = [
-    "homer-redaction-detector[ocr,fast,repair]",
+    "homer-redaction-detector[fix,ocr,fast,repair]",
 ]
 
 [project.scripts]

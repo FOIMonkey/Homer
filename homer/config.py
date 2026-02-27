@@ -49,6 +49,11 @@ class HomerConfig:
     skip_transparent_text: bool = True  # Skip opacity < threshold
     transparency_thresh: float = 0.05
 
+    # Fix mode
+    fix_dpi: int = 200      # DPI for flattening Homer pages to images
+    fix_timeout: int = 120  # Per-file timeout in seconds
+    fix_workers: int = 1    # Parallel fix workers (0 = same as --workers)
+
     # Checkpoint
     checkpoint_interval: int = 10
     checkpoint_file: str = ".homer_checkpoint.json"

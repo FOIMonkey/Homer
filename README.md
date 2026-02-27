@@ -53,6 +53,25 @@ python -m homer --directory ./pdfs --output results.csv --resume
 
 Skips files already processed in a previous run (tracked via `.homer_checkpoint.json`).
 
+### Fixing Homer redactions
+
+```bash
+# Fix a single file
+python -m homer --single-file document.pdf --fix
+
+# Fix all Homer redactions in a directory
+python -m homer --directory ./pdfs --fix --fix-dir ./fixed
+
+# Parallel fix with 4 workers, lower DPI, shorter timeout
+python -m homer --directory ./pdfs --fix --fix-workers 4 --fix-dpi 150 --fix-timeout 60
+```
+
+When `--fix` is enabled, Homer flattens each affected page into an image using `pdftoppm` (Poppler). The redaction boxes are already visually drawn, so rendering the page as a raster permanently bakes them in — the hidden text layer is destroyed and cannot be recovered.
+
+**Accessibility note:** Flattening pages to images removes all selectable text, which is bad for screen readers and accessibility. Homer's fix mode is intended as an emergency measure to stop data leakage. For a proper long-term solution, documents should be re-redacted using tools that remove the underlying text while preserving an accessible text layer (e.g. Adobe Acrobat's redaction tool).
+
+Fixed PDFs are written to the `--fix-dir` directory (default: `./fixed/`). On re-runs, already-fixed files (non-empty output) are skipped automatically.
+
 ## CLI flags
 
 | Flag | Default | Description |
@@ -70,14 +89,21 @@ Skips files already processed in a previous run (tracked via `.homer_checkpoint.
 | `--max-pages` | unlimited | Maximum pages to analyse per PDF |
 | `--max-file-mb` | `500` | Skip PDFs larger than this (MB) |
 | `--no-zorder` | off | Disable z-order analysis (fall back to OCR/darkness only) |
+| `--fix` | off | Flatten Homer-redacted pages to images, destroying hidden text |
+| `--fix-dir` | `./fixed` | Output directory for fixed PDFs |
+| `--fix-dpi` | `200` | DPI for flattening pages (72–600) |
+| `--fix-timeout` | `120` | Per-file fix timeout in seconds (10–3600) |
+| `--fix-workers` | `1` | Parallel fix workers (0–32, 0 = same as `--workers`) |
 
 ## Dependencies
 
 **Required:**
-- [PyMuPDF](https://pymupdf.readthedocs.io/) (`pip install PyMuPDF`) — PDF parsing and rendering
+- [PyMuPDF](https://pymupdf.readthedocs.io/) (`pip install PyMuPDF`) — PDF parsing and detection
+- [Pillow](https://pillow.readthedocs.io/) (`pip install Pillow`) — image handling for fix mode and OCR
+- [Poppler](https://poppler.freedesktop.org/) (`poppler-utils`) — provides `pdftoppm` and `pdfinfo` for fix mode rendering
 
 **Optional:**
-- [Pillow](https://pillow.readthedocs.io/) + [pytesseract](https://github.com/madmaze/pytesseract) — OCR verification (significantly improves accuracy)
+- [pytesseract](https://github.com/madmaze/pytesseract) — OCR verification (significantly improves accuracy)
 - [NumPy](https://numpy.org/) — accelerates pixel analysis (100–1000x speedup)
 - [pikepdf](https://pikepdf.readthedocs.io/) — automatic repair of corrupted PDFs
 - `qpdf` / `ghostscript` — additional PDF repair fallbacks (system packages)

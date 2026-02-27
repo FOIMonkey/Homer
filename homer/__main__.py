@@ -2,13 +2,15 @@
 
 import logging
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any
 
 from .cli import build_parser, config_from_args
 from .config import HomerConfig
 from .detector import TrueHomerDetector
+from .fixer import fix_homer_pages
 from .output import CSVWriter, ProgressReporter, CheckpointManager, print_forensic
 from .worker import worker_analyze
 
@@ -35,6 +37,20 @@ def main():
         det = TrueHomerDetector(config)
         result = det.analyze_document(args.single_file, verbose=True)
         print_forensic(result, no_text=no_text)
+
+        if args.fix and result.get("has_homer_redaction"):
+            fix_dir = Path(args.fix_dir)
+            fix_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(fix_dir / Path(args.single_file).name)
+            fix_result = fix_homer_pages(
+                args.single_file, result["homer_pages"], output_path, config
+            )
+            if fix_result["status"] == "fixed":
+                print(f"\nFixed PDF -> {fix_result['output']}")
+                print(f"  Pages flattened: {fix_result['pages_fixed']}")
+            else:
+                print(f"\nFix failed: {fix_result.get('error', 'unknown')}")
+
         sys.exit(0 if result.get("status") == "processed" else 1)
 
     # ---- Batch mode ----
@@ -57,6 +73,13 @@ def main():
         if total == 0:
             print("All files already processed.")
             sys.exit(0)
+
+    # Fix mode setup
+    fix_dir = None
+    files_to_fix = []  # Collect Homer files; fix after detection finishes
+    if args.fix:
+        fix_dir = Path(args.fix_dir)
+        fix_dir.mkdir(parents=True, exist_ok=True)
 
     progress = ProgressReporter(total)
     print(f"Processing {total} files with {args.workers} worker(s)...")
@@ -90,12 +113,17 @@ def main():
                 return "HOMER"
             return "CLEAN"
 
+        def _collect_for_fix(pdf_path, result):
+            if fix_dir and result.get("has_homer_redaction"):
+                files_to_fix.append((str(pdf_path), result["homer_pages"]))
+
         if args.workers <= 1:
             det = TrueHomerDetector(config)
             for pdf in pdfs:
                 result = det.analyze_document(str(pdf))
                 _write_result(result)
                 progress.tick(result.get("filename", pdf.name), _classify(result))
+                _collect_for_fix(pdf, result)
                 if ckpt:
                     ckpt.mark_done(pdf.name)
         else:
@@ -117,6 +145,7 @@ def main():
 
                     _write_result(result)
                     progress.tick(result.get("filename", pdf.name), _classify(result))
+                    _collect_for_fix(pdf, result)
                     if ckpt:
                         ckpt.mark_done(pdf.name)
 
@@ -124,6 +153,60 @@ def main():
         ckpt.save()
 
     print(f"\nDone. CSV -> {args.output}")
+
+    # Fix phase: runs after all detection is complete
+    if files_to_fix:
+        # Skip already-fixed files (non-empty output exists)
+        to_fix = []
+        skipped_fix = 0
+        for pdf_path, homer_pages in files_to_fix:
+            output_path = fix_dir / Path(pdf_path).name
+            if output_path.exists() and output_path.stat().st_size > 0:
+                skipped_fix += 1
+            else:
+                to_fix.append((pdf_path, homer_pages))
+
+        if skipped_fix:
+            print(f"\nSkipping {skipped_fix} already-fixed file(s)")
+
+        if not to_fix:
+            print("All files already fixed.")
+        else:
+            fix_n = config.fix_workers
+            if fix_n == 0:
+                fix_n = args.workers
+            fix_n = min(fix_n, len(to_fix))
+
+            print(f"\nFixing {len(to_fix)} file(s) with {fix_n} worker(s)...")
+            fixed_count = 0
+            failed_count = 0
+            t0 = time.monotonic()
+
+            def _do_fix(item):
+                pdf_path, homer_pages = item
+                output_path = str(fix_dir / Path(pdf_path).name)
+                return fix_homer_pages(pdf_path, homer_pages, output_path, config)
+
+            with ThreadPoolExecutor(max_workers=fix_n) as tex:
+                futures = {tex.submit(_do_fix, item): item for item in to_fix}
+                for i, fut in enumerate(as_completed(futures), 1):
+                    pdf_path = futures[fut][0]
+                    name = Path(pdf_path).name
+                    try:
+                        fix_result = fut.result()
+                    except Exception as e:
+                        failed_count += 1
+                        print(f"  [{i}/{len(to_fix)}] Failed: {name} ({e})")
+                        continue
+                    if fix_result["status"] == "fixed":
+                        fixed_count += 1
+                        print(f"  [{i}/{len(to_fix)}] Fixed: {name} (pages {fix_result['pages_fixed']})")
+                    else:
+                        failed_count += 1
+                        print(f"  [{i}/{len(to_fix)}] Failed: {name} ({fix_result.get('error', 'unknown')})")
+
+            elapsed = int(time.monotonic() - t0)
+            print(f"Fix complete: {fixed_count} fixed, {failed_count} failed ({elapsed}s) -> {fix_dir}/")
 
 
 if __name__ == "__main__":

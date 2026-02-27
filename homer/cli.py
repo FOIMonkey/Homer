@@ -71,6 +71,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-zorder", action="store_true",
                         help="Disable z-order analysis (fall back to OCR/darkness only)")
 
+    # Fix mode
+    parser.add_argument("--fix", action="store_true",
+                        help="Flatten Homer-redacted pages to images, destroying hidden text")
+    parser.add_argument("--fix-dir", default="./fixed",
+                        help="Output directory for fixed PDFs (default: ./fixed/)")
+    parser.add_argument("--fix-dpi", type=_bounded_int(72, 600, "--fix-dpi"),
+                        default=None,
+                        help=f"DPI for flattening pages 72-600 (default: {HomerConfig.fix_dpi})")
+    parser.add_argument("--fix-timeout", type=_bounded_int(10, 3600, "--fix-timeout"),
+                        default=None,
+                        help=f"Per-file fix timeout in seconds 10-3600 (default: {HomerConfig.fix_timeout})")
+    parser.add_argument("--fix-workers", type=_bounded_int(0, 32, "--fix-workers"),
+                        default=None,
+                        help="Parallel fix workers 0-32, 0 = same as --workers (default: 1)")
+
     return parser
 
 
@@ -90,4 +105,10 @@ def config_from_args(args: argparse.Namespace) -> HomerConfig:
         config.max_file_mb = args.max_file_mb
     if args.no_zorder:
         config.use_zorder = False
+    if args.fix_dpi is not None:
+        config.fix_dpi = args.fix_dpi
+    if args.fix_timeout is not None:
+        config.fix_timeout = args.fix_timeout
+    if args.fix_workers is not None:
+        config.fix_workers = args.fix_workers
     return config
